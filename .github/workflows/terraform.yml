@@ -1,1 +1,50 @@
+name: Terraform CI/CD
 
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # 1. Checkout
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. Azure Login
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # 3. Verify Azure Login
+      - name: Check Azure Login
+        run: |
+          az account show
+
+      # 4. Setup Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # 5. Terraform Format
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      # 6. Terraform Init
+      - name: Terraform Init
+        run: terraform init
+
+      # 7. Terraform Validate
+      - name: Terraform Validate
+        run: terraform validate
+
+      # 8. Terraform Plan
+      - name: Terraform Plan
+        run: terraform plan -no-color -out=tfplan
