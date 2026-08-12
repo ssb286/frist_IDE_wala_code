@@ -60,7 +60,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "=5.0.1"
+          terraform_version: 1.9.8
 
 
       # --------------------------------------------------------
