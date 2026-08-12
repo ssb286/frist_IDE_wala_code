@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+
   pull_request:
     branches:
       - main
@@ -14,20 +15,20 @@ permissions:
 
 jobs:
 
-  # =========================================================
+  # =====================================================
   # TERRAFORM PLAN
-  # =========================================================
+  # =====================================================
   terraform-plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
 
     steps:
 
-      # 1. Checkout
+      # 1. Checkout Repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. Azure Login
+      # 2. Azure Login using OIDC
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -44,32 +45,37 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      # 5. Check Terraform files
+      # 5. Check Terraform Configuration
       - name: Check Terraform Configuration
-        working-directory: ./terraform
+        working-directory: ./root
         run: |
+          echo "Current directory:"
           pwd
+
+          echo "Terraform files:"
           ls -la
+
+          echo "Terraform version:"
           terraform version
 
-      # 6. Format
+      # 6. Terraform Format
       - name: Terraform Format Check
-        working-directory: ./terraform
+        working-directory: ./root
         run: terraform fmt -check -recursive
 
-      # 7. Init
+      # 7. Terraform Init
       - name: Terraform Init
-        working-directory: ./terraform
+        working-directory: ./root
         run: terraform init
 
-      # 8. Validate
+      # 8. Terraform Validate
       - name: Terraform Validate
-        working-directory: ./terraform
+        working-directory: ./root
         run: terraform validate
 
-      # 9. Plan
+      # 9. Terraform Plan
       - name: Terraform Plan
-        working-directory: ./terraform
+        working-directory: ./root
         run: terraform plan -no-color -out=tfplan
 
       # 10. Upload Plan
@@ -77,30 +83,28 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plan
-          path: terraform/tfplan
+          path: root/tfplan
 
 
-  # =========================================================
+  # =====================================================
   # TERRAFORM APPLY
-  # =========================================================
+  # =====================================================
   terraform-apply:
     name: Terraform Apply
     needs: terraform-plan
 
-    # Apply ONLY when push is made to main
+    # Apply ONLY on push/merge to main
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     runs-on: ubuntu-latest
 
-    # GitHub Environment
-    # Configure required approval in:
-    # Settings → Environments → production
+    # Manual approval environment
     environment:
       name: production
 
     steps:
 
-      # 1. Checkout
+      # 1. Checkout Repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -123,10 +127,17 @@ jobs:
 
       # 5. Terraform Init
       - name: Terraform Init
-        working-directory: ./terraform
+        working-directory: ./root
         run: terraform init
 
-      # 6. Terraform Apply
+      # 6. Download Approved Plan
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: root
+
+      # 7. Terraform Apply
       - name: Terraform Apply
-        working-directory: ./terraform
-        run: terraform apply -auto-approve
+        working-directory: ./root
+        run: terraform apply -auto-approve tfplan
