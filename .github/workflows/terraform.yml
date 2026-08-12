@@ -5,13 +5,20 @@ on:
     branches:
       - main
   pull_request:
+    branches:
+      - main
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  terraform:
+
+  # =========================================================
+  # TERRAFORM PLAN
+  # =========================================================
+  terraform-plan:
+    name: Terraform Plan
     runs-on: ubuntu-latest
 
     steps:
@@ -37,18 +44,89 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      # 5. Terraform Format
+      # 5. Check Terraform files
+      - name: Check Terraform Configuration
+        working-directory: ./terraform
+        run: |
+          pwd
+          ls -la
+          terraform version
+
+      # 6. Format
       - name: Terraform Format Check
+        working-directory: ./terraform
         run: terraform fmt -check -recursive
 
-      # 6. Terraform Init
+      # 7. Init
       - name: Terraform Init
+        working-directory: ./terraform
         run: terraform init
 
-      # 7. Terraform Validate
+      # 8. Validate
       - name: Terraform Validate
+        working-directory: ./terraform
         run: terraform validate
 
-      # 8. Terraform Plan
+      # 9. Plan
       - name: Terraform Plan
+        working-directory: ./terraform
         run: terraform plan -no-color -out=tfplan
+
+      # 10. Upload Plan
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: terraform/tfplan
+
+
+  # =========================================================
+  # TERRAFORM APPLY
+  # =========================================================
+  terraform-apply:
+    name: Terraform Apply
+    needs: terraform-plan
+
+    # Apply ONLY when push is made to main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-latest
+
+    # GitHub Environment
+    # Configure required approval in:
+    # Settings → Environments → production
+    environment:
+      name: production
+
+    steps:
+
+      # 1. Checkout
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. Azure Login
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # 3. Verify Azure Login
+      - name: Check Azure Login
+        run: |
+          az account show
+
+      # 4. Setup Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # 5. Terraform Init
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
+
+      # 6. Terraform Apply
+      - name: Terraform Apply
+        working-directory: ./terraform
+        run: terraform apply -auto-approve
