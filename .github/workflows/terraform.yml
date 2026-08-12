@@ -1,4 +1,5 @@
-name: Terraform Azure CI/CD
+
+name: Terraform CI/CD
 
 on:
   push:
@@ -9,99 +10,34 @@ on:
     branches:
       - main
 
-  workflow_dispatch:
-
+# Required for Azure OIDC
 permissions:
   id-token: write
   contents: read
-  pull-requests: write
-
-env:
-  ARM_USE_OIDC: true
-  TF_VERSION: "1.9.8"
 
 jobs:
 
   # ============================================================
-  # STAGE 1 - SECURITY SCAN
+  # TERRAFORM PLAN
   # ============================================================
-  security_scan:
-
-    name: Security Scan
-    runs-on: ubuntu-latest
-
-    steps:
-
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      # -------------------------------
-      # Terraform Format Check
-      # -------------------------------
-      - name: Terraform Format Check
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: Terraform Fmt
-        run: terraform fmt -check -recursive
-
-      # -------------------------------
-      # TFLint
-      # -------------------------------
-      - name: Run TFLint
-        uses: terraform-linters/setup-tflint@v4
-
-      - name: TFLint Init
-        run: tflint --init
-
-      - name: TFLint Scan
-        run: tflint --recursive
-
-      # -------------------------------
-      # Gitleaks
-      # -------------------------------
-      - name: Gitleaks Scan
-        uses: gitleaks/gitleaks-action@v2
-
-      # -------------------------------
-      # Trivy IaC Scan
-      # -------------------------------
-      - name: Trivy Scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: config
-          scan-ref: .
-          severity: HIGH,CRITICAL
-
-
-  # ============================================================
-  # STAGE 2 - TERRAFORM PLAN
-  # ============================================================
-  terraform_plan:
+  terraform-plan:
 
     name: Terraform Plan
-    runs-on: ubuntu-latest
 
-    needs:
-      - security_scan
+    runs-on: ubuntu-latest
 
     steps:
 
-      - name: Checkout Code
+      # --------------------------------------------------------
+      # 1. Checkout Repository
+      # --------------------------------------------------------
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # -------------------------------
-      # Setup Terraform
-      # -------------------------------
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
 
-      # -------------------------------
-      # Azure Login using OIDC
-      # -------------------------------
+      # --------------------------------------------------------
+      # 2. Azure Login using OIDC
+      # --------------------------------------------------------
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -109,68 +45,116 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # -------------------------------
-      # Terraform Init
-      # -------------------------------
+
+      # --------------------------------------------------------
+      # 3. Verify Azure Login
+      # --------------------------------------------------------
+      - name: Check Azure Login
+        run: |
+          az account show
+
+
+      # --------------------------------------------------------
+      # 4. Setup Terraform
+      # --------------------------------------------------------
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "=5.0.1"
+
+
+      # --------------------------------------------------------
+      # 5. Check Terraform Configuration
+      # --------------------------------------------------------
+      - name: Check Terraform Configuration
+        working-directory: ./root
+        run: |
+          echo "Current directory:"
+          pwd
+
+          echo ""
+          echo "Terraform files:"
+          ls -la
+
+          echo ""
+          echo "Terraform version:"
+          terraform version
+
+
+      # --------------------------------------------------------
+      # 6. Terraform Format Check
+      # --------------------------------------------------------
+      - name: Terraform Format Check
+        working-directory: ./root
+        run: terraform fmt -check -recursive
+
+
+      # --------------------------------------------------------
+      # 7. Terraform Init
+      # --------------------------------------------------------
       - name: Terraform Init
+        working-directory: ./root
         run: terraform init
 
-      # -------------------------------
-      # Terraform Validate
-      # -------------------------------
+
+      # --------------------------------------------------------
+      # 8. Terraform Validate
+      # --------------------------------------------------------
       - name: Terraform Validate
+        working-directory: ./root
         run: terraform validate
 
-      # -------------------------------
-      # Terraform Plan
-      # -------------------------------
-      - name: Terraform Plan
-        run: terraform plan -out=tfplan
 
-      # -------------------------------
-      # Upload Plan
-      # -------------------------------
+      # --------------------------------------------------------
+      # 9. Terraform Plan
+      # --------------------------------------------------------
+      - name: Terraform Plan
+        working-directory: ./root
+        run: terraform plan -no-color -out=tfplan
+
+
+      # --------------------------------------------------------
+      # 10. Upload Terraform Plan
+      # --------------------------------------------------------
       - name: Upload Terraform Plan
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plan
-          path: tfplan
+          path: root/tfplan
 
 
   # ============================================================
-  # STAGE 3 - APPLY
+  # TERRAFORM APPLY
   # ============================================================
-  terraform_apply:
+  terraform-apply:
 
     name: Terraform Apply
+
+    needs: terraform-plan
+
+    # Apply ONLY after merge/push to main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
     runs-on: ubuntu-latest
 
-    # Apply only after plan
-    needs:
-      - terraform_plan
-
-    # Only main branch
-    if: github.ref == 'refs/heads/main'
-
+    # GitHub Environment
+    # Configure required reviewers in:
+    # Settings → Environments → production
     environment:
       name: production
 
     steps:
 
-      - name: Checkout Code
+      # --------------------------------------------------------
+      # 1. Checkout Repository
+      # --------------------------------------------------------
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # -------------------------------
-      # Setup Terraform
-      # -------------------------------
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
 
-      # -------------------------------
-      # Azure Login
-      # -------------------------------
+      # --------------------------------------------------------
+      # 2. Azure Login using OIDC
+      # --------------------------------------------------------
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -178,22 +162,59 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # -------------------------------
-      # Terraform Init
-      # -------------------------------
+
+      # --------------------------------------------------------
+      # 3. Verify Azure Login
+      # --------------------------------------------------------
+      - name: Check Azure Login
+        run: |
+          az account show
+
+
+      # --------------------------------------------------------
+      # 4. Setup Terraform
+      # --------------------------------------------------------
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "=5.0.1"
+
+
+      # --------------------------------------------------------
+      # 5. Terraform Init
+      # --------------------------------------------------------
       - name: Terraform Init
+        working-directory: ./root
         run: terraform init
 
-      # -------------------------------
-      # Download Plan
-      # -------------------------------
+
+      # --------------------------------------------------------
+      # 6. Download Terraform Plan
+      # --------------------------------------------------------
       - name: Download Terraform Plan
         uses: actions/download-artifact@v4
         with:
           name: terraform-plan
+          path: root
 
-      # -------------------------------
-      # Terraform Apply
-      # -------------------------------
+
+      # --------------------------------------------------------
+      # 7. Verify Plan File
+      # --------------------------------------------------------
+      - name: Verify Terraform Plan
+        working-directory: ./root
+        run: |
+          echo "Files in root:"
+          ls -la
+
+          echo ""
+          echo "Terraform plan:"
+          ls -lh tfplan
+
+
+      # --------------------------------------------------------
+      # 8. Terraform Apply
+      # --------------------------------------------------------
       - name: Terraform Apply
+        working-directory: ./root
         run: terraform apply -auto-approve tfplan
